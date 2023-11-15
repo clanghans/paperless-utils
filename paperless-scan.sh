@@ -1,63 +1,9 @@
 #!/usr/bin/env bash
 
+source "yes_or_no.sh"
+
 function main(){
-    # single|double|loop|ask
-    local COMMAND_MODE="ask"
-    local POSITIONAL_ARGS=()
-
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -m|--mode)
-                COMMAND_MODE="$2"
-                shift # past argument
-                shift # past value
-                ;;
-            -*|--*)
-                echo "Unknown option $1"
-                exit 1
-                ;;
-            *)
-                POSITIONAL_ARGS+=("$1") # save positional arg
-                shift # past argument
-                ;;
-        esac
-    done
-
-    if [ "${COMMAND_MODE}" == "loop" ]; then
-        local exit_loop=false
-
-        while [ "$exit_loop" = false ]
-        do
-            scan
-
-            # Ask the user if they want to exit the loop
-            read -rp "Do you want to exit the loop? (yes/no): " choice
-
-            # default is no
-            case "$choice" in
-                [Yy] | [Yy][Ee][Ss] )
-                    exit_loop=true
-                    ;;
-                [Nn] | [Nn][Oo] | * )
-                    exit_loop=false
-                    ;;
-            esac
-        done
-    fi
-
-}
-
-PAPERLESS_CONFIG_PATH="$HOME/.config/paperless"
-PAPERLESS_EXPORT_PATH="${PAPERLESS_CONFIG_PATH}/export"
-PAPERLESS_HOME_PATH="$HOME/paperless"
-PAPERLESS_CONSUME_PATH="${PAPERLESS_HOME_PATH}/consume"
-
-function get_paperless_tags(){
-    # Define the path to the JSON file
-    _file="manifest.json"
-
-    # Using jq to extract elements where model is 'documents.tag'
-    jq '.[] | select(.model == "documents.tag")' $FILE_PATH
+    scan "$1"
 }
 
 function validate(){
@@ -104,46 +50,49 @@ function scan_brother(){
 }
 
 function scan(){
-    # Define the output directory and filenames
-    date=$(date '+%Y-%m-%d')
-    hash=$(date '+%Y-%m-%d-%H-%M-%S-%N' | sha256sum)
-    hash_long=$(echo "${hash}" | cut -c 1-8)
-    # hash_short=$(echo "${hash}" | cut -c 1-4)
 
-    output_dir="${hash_long}"
-    output_filename="${date}-${hash_long}.pdf"
+    if [ -z "$1" ]; then
+        # Define the output directory and filenames
+        date=$(date '+%Y-%m-%d')
+        hash=$(date '+%Y-%m-%d-%H-%M-%S-%N' | sha256sum)
+        hash_long=$(echo "${hash}" | cut -c 1-8)
 
-    mkdir -p "$output_dir"
+        tmp_dir="/tmp/${hash_long}"
+        output_filename="${date}-${hash_long}.pdf"
+    else
+        tmp_dir="/tmp/$1"
+        output_filename="$1"
+    fi
 
-    scan_brother "${output_dir}" 2 1
+    mkdir -p "${tmp_dir}"
+
+    scan_brother "${tmp_dir}" 2 1
 
     # Count the number of scanned pages
     # add one to amount to get the correct amount of pages
-    amount=$(find "$output_dir" -type f -name 'out*.tif' | wc -l)
+    amount=$(find "${tmp_dir}" -type f -name 'out*.tif' | wc -l)
     amount=$((amount*2))
 
     # Prompt the user for scanning the back side
-    read -rp "Do you want to scan the back side of the pages? (Y/n): " scan_back
-
-    # convert scan_back to lowercase with awk
-    # Default value is 'y'
-    scan_back=$(echo "${scan_back:-y}" | awk '{print tolower($0)}')
-
-    # Check if the user wants to scan the back side
-    if [ "${scan_back}" == "y" ]; then
-        scan_brother "${output_dir}" -2 ${amount}
+    yes_or_no "Do you want to scan the back side of the pages?" "yes"
+    if [ $? -eq 1 ]; then
+        scan_brother "${tmp_dir}" -2 ${amount}
     fi
 
     # Combine scanned images with back side in reverse order
     echo "Combining scanned images..."
-    convert "${output_dir}/out*.tif" "${output_dir}/${output_filename}"
+    convert "${tmp_dir}/out*.tif" "${tmp_dir}/${output_filename}"
 
     # Optionally, perform post-processing with Ghostscript (e.g., optimize PDF)
     # This step is optional but recommended for better PDF quality and smaller file size.
-    gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/default -dNOPAUSE -dBATCH -dQUIET -sOutputFile="${output_filename}" "${output_dir}/${output_filename}"
+    echo "Optimizing PDF..."
+    gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/default -dNOPAUSE -dBATCH -dQUIET \
+        -sOutputFile="${output_filename}" "${tmp_dir}/${output_filename}"
 
     # DEBUG - display the PDF
     # google-chrome "${output_filename}" &
+
+    echo "filename: ${output_filename}"
 }
 
 validate
